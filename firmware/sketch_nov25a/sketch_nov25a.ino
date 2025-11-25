@@ -5,24 +5,18 @@
    Kelembapan tanah, Suhu dan Kelembapan Udara
  */
 
+// Libraries
+#include <DHT.h>
+
 // Pin Mapping
-// #define PIN_SOIL_SENSOR 34
-// #define PIN_DHT 18
-// #define PIN_RELAY_PUMP 19
-
-// PIN SIMULASI PROTEUS
-#define PIN_SOIL_SENSOR A0
-#define PIN_DHT 3
-#define PIN_RELAY_PUMP 2
-
+#define PIN_SOIL_SENSOR 34
+#define PIN_DHT 18
+#define PIN_RELAY_PUMP 19
 
 // Konfigurasi Sensor
 #define DHTTYPE DHT22
 const int DRY_THRESHOLD = 60;
 const int WET_THRESHOLD = 70;
-
-// Libraries
-#include <DHT.h>
 
 // Global Object
 DHT dht(PIN_DHT, DHTTYPE);
@@ -31,12 +25,8 @@ DHT dht(PIN_DHT, DHTTYPE);
 void soilMoistureSensor(){
   // Soil Moisture
   int rawValue = analogRead(PIN_SOIL_SENSOR);
-  
-  // int soilMoisture = map(rawValue, 4095, 0, 0, 100);
-  // soilMoisture = constrain(soilMoisture, 0, 100);
-
-  // SENSOR SIMULASI PROTEUS
-  int soilMoisture = map(rawValue, 1023, 0, 0, 100);
+  int soilMoisture = map(rawValue, 4095, 0, 0, 100);
+  soilMoisture = constrain(soilMoisture, 0, 100);
 
   Serial.print("Kelembapan Tanah: ");
   Serial.print(soilMoisture);
@@ -57,8 +47,9 @@ void DHTsensor(){
   int humidity = dht.readHumidity();
   if (isnan(humidity) || isnan(temperature)) {
     Serial.println("Gagal membaca sensor DHT!");
-    return; // Keluar dari fungsi agar tidak mengirim data sampah
+    return;
   }
+  
   Serial.print("Kelembapan Udara: ");
   Serial.print(humidity);
   Serial.println("%");
@@ -75,7 +66,6 @@ void setup(){
   digitalWrite(PIN_RELAY_PUMP, LOW);
 
   dht.begin();
-
 }
 
 // Main Program
