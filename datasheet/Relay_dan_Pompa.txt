@@ -1,0 +1,11 @@
+Relay:
+Tegangan Kerja : 5V
+Modul Relay : Songle SRD-05VDC-SL-C(standar industri)
+Interface Logic : 3.3V atau 5V
+Beban Maksimum : 10A 250VAC / 10A VDC
+
+Pompa:
+Tegangan Input: 3V-5V
+Arus Input: 130mA-220mA
+Dapat di naikan air sampai 40cm
+Aliran Maksimum: 2 liter/menit

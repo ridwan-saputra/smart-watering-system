@@ -6,9 +6,15 @@
  */
 
 // Pin Mapping
-#define PIN_SOIL_SENSOR 34
-#define PIN_RELAY_PUMP 19
-#define PIN_DHT 18
+// #define PIN_SOIL_SENSOR 34
+// #define PIN_DHT 18
+// #define PIN_RELAY_PUMP 19
+
+// PIN SIMULASI PROTEUS
+#define PIN_SOIL_SENSOR A0
+#define PIN_DHT 3
+#define PIN_RELAY_PUMP 2
+
 
 // Konfigurasi Sensor
 #define DHTTYPE DHT22
@@ -25,8 +31,13 @@ DHT dht(PIN_DHT, DHTTYPE);
 void soilMoistureSensor(){
   // Soil Moisture
   int rawValue = analogRead(PIN_SOIL_SENSOR);
-  int soilMoisture = map(rawValue, 4095, 0, 0, 100);
-  soilMoisture = constrain(soilMoisture, 0, 100);
+  
+  // int soilMoisture = map(rawValue, 4095, 0, 0, 100);
+  // soilMoisture = constrain(soilMoisture, 0, 100);
+
+  // SENSOR SIMULASI PROTEUS
+  int soilMoisture = map(rawValue, 1023, 0, 0, 100);
+
   Serial.print("Kelembapan Tanah: ");
   Serial.print(soilMoisture);
   Serial.println("%");
@@ -71,5 +82,5 @@ void setup(){
 void loop(){
   soilMoistureSensor();
   DHTsensor();
-  delay(1000);
+  delay(500);
 }
