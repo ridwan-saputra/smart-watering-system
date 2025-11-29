@@ -1,3 +1,4 @@
+
 #define BLYNK_PRINT Serial
 
 // --- LIBRARIES ---
@@ -7,13 +8,15 @@
 #include <DHT.h>
 
 // --- KONFIGURASI WIFI ---
-const char* ssid = "Wokwi-GUEST";
+const char* ssid = "";
 const char* password = "";
 
 // --- KONFIGURASI PIN ---
-const int PIN_SOIL  = 34;
-const int PIN_DHT   = 21;
-const int PIN_PUMP  = 18;
+const int PIN_SOIL       = 34;
+const int PIN_DHT        = 23;
+const int PIN_PUMP       = 18;
+const int PIN_BUZZER     = 5;
+const int PIN_MASTER_BTN = 19;  // <--- PIN BARU: Tombol Fisik (Sambung ke GND)
 
 // --- VIRTUAL PINS BLYNK ---
 #define VPIN_SOIL_DISPLAY V0
@@ -23,9 +26,9 @@ const int PIN_PUMP  = 18;
 
 // --- KONFIGURASI LOGIKA ---
 #define DHT_TYPE DHT22
-const int LIMIT_DRY = 60; // Batas kering (Nyalakan pompa)
-const int LIMIT_WET = 70; // Batas basah (Matikan pompa)
-const long RECONNECT_INTERVAL = 10000; // 10 Detik
+const int LIMIT_DRY = 60; 
+const int LIMIT_WET = 70; 
+const long RECONNECT_INTERVAL = 10000; 
 
 // --- OBJECTS ---
 DHT dht(PIN_DHT, DHT_TYPE);
@@ -37,42 +40,58 @@ float temperature = 0.0;
 bool isAutoMode = true;
 unsigned long lastConnectionAttempt = 0;
 
+// STATUS UTAMA SISTEM (Default False = Mati saat dicolok)
+bool isSystemOn = false; 
+
 // ==========================================
-// 1. FUNGSI HARDWARE (BACA & KONTROL FISIK)
+// 0. FUNGSI UTILITY (BUZZER)
 // ==========================================
-
-void readSensors() {
-  // Baca Soil Moisture
-  int rawValue = analogRead(PIN_SOIL);
-  soilMoisture = map(rawValue, 4095, 0, 0, 100);
-  soilMoisture = constrain(soilMoisture, 0, 100);
-
-  // Baca Suhu
-  temperature = dht.readTemperature();
-}
-
-void setPumpState(bool turnOn) {
-  // Cek status fisik saat ini agar tidak write berulang-ulang
-  bool currentStatus = digitalRead(PIN_PUMP);
-  
-  if (turnOn && !currentStatus) {
-    digitalWrite(PIN_PUMP, HIGH);
-    Serial.println(">> POMPA: MENYALA (ON)");
-    if (Blynk.connected()) Blynk.virtualWrite(VPIN_PUMP_BUTTON, 1);
-  } 
-  else if (!turnOn && currentStatus) {
-    digitalWrite(PIN_PUMP, LOW);
-    Serial.println(">> POMPA: MATI (OFF)");
-    if (Blynk.connected()) Blynk.virtualWrite(VPIN_PUMP_BUTTON, 0);
+void beep(int times) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(PIN_BUZZER, HIGH);
+    delay(100); 
+    digitalWrite(PIN_BUZZER, LOW);
+    delay(100);
   }
 }
 
 // ==========================================
-// 2. FUNGSI LOGIKA (OTOMATISASI)
+// 1. FUNGSI HARDWARE & LOGIKA
 // ==========================================
 
+void readSensors() {
+  int rawValue = analogRead(PIN_SOIL);
+  soilMoisture = map(rawValue, 4095, 0, 0, 100);
+  soilMoisture = constrain(soilMoisture, 0, 100);
+  temperature = dht.readTemperature();
+}
+
+void setPumpState(bool turnOn) {
+  // PENGAMAN: Jika sistem OFF, pompa DILARANG nyala
+  if (!isSystemOn) {
+    digitalWrite(PIN_PUMP, LOW);
+    digitalWrite(PIN_BUZZER, LOW);
+    return;
+  }
+
+  bool currentStatus = digitalRead(PIN_PUMP);
+  
+  if (turnOn && !currentStatus) {
+    digitalWrite(PIN_PUMP, HIGH);
+    digitalWrite(PIN_BUZZER, HIGH); 
+    Serial.println(">> POMPA: MENYALA (ON) + BUZZER ON");
+    if (Blynk.connected()) Blynk.virtualWrite(VPIN_PUMP_BUTTON, 1);
+  } 
+  else if (!turnOn && currentStatus) {
+    digitalWrite(PIN_PUMP, LOW);
+    digitalWrite(PIN_BUZZER, LOW);  
+    Serial.println(">> POMPA: MATI (OFF) + BUZZER OFF");
+    if (Blynk.connected()) Blynk.virtualWrite(VPIN_PUMP_BUTTON, 0);
+  }
+}
+
 void runAutoLogic() {
-  if (!isAutoMode) return; // Jika manual, keluar dari fungsi ini
+  if (!isAutoMode) return; 
 
   if (soilMoisture < LIMIT_DRY) {
     Serial.println("[LOGIC] Tanah Kering -> Perintah ON");
@@ -85,69 +104,105 @@ void runAutoLogic() {
 }
 
 // ==========================================
-// 3. FUNGSI KOMUNIKASI (WIFI & BLYNK)
+// 2. FUNGSI BARU: MASTER BUTTON
+// ==========================================
+void checkMasterButton() {
+  // Baca tombol (Active LOW karena INPUT_PULLUP)
+  // Jika ditekan, nilainya LOW (0)
+  static int lastState = HIGH;
+  int currentState = digitalRead(PIN_MASTER_BTN);
+
+  if (lastState == HIGH && currentState == LOW) {
+    // Tombol baru saja ditekan
+    delay(50); // Debounce sederhana (tunggu getaran tombol hilang)
+    
+    if (digitalRead(PIN_MASTER_BTN) == LOW) {
+      // Toggle status (ON jadi OFF, OFF jadi ON)
+      isSystemOn = !isSystemOn;
+
+      if (isSystemOn) {
+        Serial.println("\n>>> SYSTEM ENABLED (SIAP KERJA) <<<");
+        beep(1); // Bunyi panjang 1x tanda AKTIF
+      } else {
+        Serial.println("\n>>> SYSTEM DISABLED (STANDBY) <<<");
+        
+        // MATIKAN PAKSA SEMUA SAAT OFF
+        digitalWrite(PIN_PUMP, LOW);
+        digitalWrite(PIN_BUZZER, LOW);
+        if (Blynk.connected()) Blynk.virtualWrite(VPIN_PUMP_BUTTON, 0);
+        
+        beep(3); // Bunyi pendek 3x tanda MATI
+      }
+    }
+  }
+  lastState = currentState;
+}
+
+// ==========================================
+// 3. FUNGSI UTAMA (MAIN TASK)
 // ==========================================
 
 void sendDataToCloud() {
+  // Kirim data hanya jika terhubung
   if (Blynk.connected()) {
     Blynk.virtualWrite(VPIN_SOIL_DISPLAY, soilMoisture);
     Blynk.virtualWrite(VPIN_TEMP_DISPLAY, temperature);
-  } else {
-    Serial.printf("[OFFLINE] Soil: %d%% | Temp: %.1fC\n", soilMoisture, temperature);
   }
 }
 
-// Fungsi gabungan yang dipanggil Timer setiap 2 detik
 void mainTask() {
-  readSensors();     // 1. Baca sensor dulu
-  runAutoLogic();    // 2. Tentukan nasib pompa
-  sendDataToCloud(); // 3. Lapor ke internet (kalau ada)
+  // JIKA SYSTEM OFF, TIDAK LAKUKAN APAPUN
+  if (!isSystemOn) {
+    Serial.println("[STANDBY] Menunggu Tombol Master ditekan...");
+    return;
+  }
+
+  readSensors();     
+  runAutoLogic();    
+  sendDataToCloud(); 
 }
 
 void handleConnection() {
-  // Jika WiFi putus, coba reconnect
+  // Tetap izinkan WiFi connect di background agar siap dipakai
   if (WiFi.status() != WL_CONNECTED) {
     if (millis() - lastConnectionAttempt >= RECONNECT_INTERVAL) {
-      Serial.println("WiFi Putus! Mencoba reconnect WiFi...");
+      Serial.println("WiFi Putus! Reconnecting...");
       WiFi.disconnect();
       WiFi.reconnect();
       lastConnectionAttempt = millis();
     }
-    return; // Keluar, jangan lanjut cek Blynk dulu
+    return; 
   }
 
-  // Jika WiFi aman tapi Blynk putus
   if (!Blynk.connected()) {
     if (millis() - lastConnectionAttempt >= RECONNECT_INTERVAL) {
-      Serial.println("Mencoba konek ke Blynk...");
+      Serial.println("Reconnecting Blynk...");
       if (Blynk.connect()) {
-        Serial.println("Blynk Terhubung Kembali!");
+        Serial.println("Blynk Connected!");
+        beep(2);
+        // Jangan beep disini agar tidak berisik saat standby
       }
       lastConnectionAttempt = millis();
     }
   } else {
-    // Jika semua aman, jalankan rutin Blynk
     Blynk.run();
   }
 }
 
 void updateAppUI() {
-  // Update tampilan tombol di Aplikasi berdasarkan Mode
   if (isAutoMode) {
     Blynk.setProperty(VPIN_PUMP_BUTTON, "isDisabled", true);
-    Blynk.setProperty(VPIN_PUMP_BUTTON, "color", "#7f8c8d"); // Abu-abu
+    Blynk.setProperty(VPIN_PUMP_BUTTON, "color", "#7f8c8d"); 
     Blynk.setProperty(VPIN_PUMP_BUTTON, "label", "AUTO (Terkunci)");
-    Serial.println("Mode: OTOMATIS");
   } else {
     Blynk.setProperty(VPIN_PUMP_BUTTON, "isDisabled", false);
-    Blynk.setProperty(VPIN_PUMP_BUTTON, "color", "#23C48E"); // Hijau
+    Blynk.setProperty(VPIN_PUMP_BUTTON, "color", "#23C48E"); 
     Blynk.setProperty(VPIN_PUMP_BUTTON, "label", "MANUAL POMPA");
-    Serial.println("Mode: MANUAL");
   }
 }
 
 // ==========================================
-// 4. BLYNK CALLBACKS (INPUT DARI HP)
+// 4. BLYNK CALLBACKS
 // ==========================================
 
 BLYNK_CONNECTED() {
@@ -161,16 +216,11 @@ BLYNK_WRITE(VPIN_MODE_BUTTON) {
 }
 
 BLYNK_WRITE(VPIN_PUMP_BUTTON) {
-  if (isAutoMode) return; // Abaikan jika mode Auto
+  if (!isSystemOn) return; // Cegah kontrol Blynk jika sistem OFF
+  if (isAutoMode) return; 
 
   int manualState = param.asInt();
-  if (manualState == 1) {
-    Serial.println("[MANUAL] Tombol ditekan -> ON");
-    setPumpState(true);
-  } else {
-    Serial.println("[MANUAL] Tombol dilepas -> OFF");
-    setPumpState(false);
-  }
+  setPumpState(manualState == 1);
 }
 
 // ==========================================
@@ -182,21 +232,38 @@ void setup() {
   
   // Setup Hardware
   pinMode(PIN_PUMP, OUTPUT);
+  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_MASTER_BTN, INPUT_PULLUP); // PENTING: PULLUP AKTIF
+  
   digitalWrite(PIN_PUMP, LOW);
+  digitalWrite(PIN_BUZZER, LOW);
+  
   dht.begin();
 
-  // Setup Koneksi (Non-Blocking)
+  Serial.println("--- SYSTEM BOOTING (STANDBY MODE) ---");
+  Serial.println("Tekan tombol fisik di PIN 5 untuk memulai.");
+  
+  // Kita HAPUS beep awal, supaya benar-benar hening saat dicolok
+  // beep(1); 
+
+  // Setup Koneksi
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Blynk.config(BLYNK_AUTH_TOKEN);
 
-  // Setup Timer
   timer.setInterval(2000L, mainTask);
-  
-  Serial.println("--- SISTEM SMART WATERING DIMULAI ---");
 }
 
 void loop() {
-  timer.run();        // Menjalankan tugas sensor & logika (Priority 1)
-  handleConnection(); // Mengurus koneksi internet (Priority 2)
+  // 1. Cek tombol fisik terus menerus
+  checkMasterButton();
+
+  // 2. Jalankan timer hanya jika timer butuh jalan
+  // (Timer di dalam mainTask sudah kita kasih "if (!isSystemOn) return")
+  timer.run();        
+  
+  // 3. Handle Koneksi WiFi/Blynk
+  // Kita biarkan WiFi tetap konek di background supaya saat tombol ditekan, 
+  // dia sudah online dan tidak perlu nunggu connecting lagi.
+  handleConnection(); 
 }
